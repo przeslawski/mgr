@@ -15,7 +15,7 @@ import numpy as np
 import cv2 as cv
 
 
-def drawLines(img1, img2, lines, pts1, pts2, showlines=False):
+def drawLines(img1, img2, lines, pts1, pts2, showlines=True):
     '''
     img1 - image on which we draw the epilines for the points in img2
     lines - corresponding epilines
@@ -67,7 +67,15 @@ def detectAndMatchFeatures(img1, img2):
         print("img%d detected %d features" % (idx+1, len(desc)))
     print("found %d matches" % len(matches))
 
-    # ratio test as per Lowe's paper TODO: what's that?
+    """Filter matches using the Lowe's ratio test.
+
+    The ratio test checks if matches are ambiguous and should be
+    removed by checking that the two distances are sufficiently
+    different. If they are not, then the match at that keypoint is
+    ignored.
+
+    https://stackoverflow.com/questions/51197091/how-does-the-lowes-ratio-test-work
+    """
     for idx, (m, n) in enumerate(matches):
         if m.distance < 0.8 * n.distance:
             pts2.append(kp2[m.trainIdx].pt)
@@ -77,53 +85,71 @@ def detectAndMatchFeatures(img1, img2):
 
     return pts1, pts2
 
+# def rectify(img, F):
+    # rectified = cv.stereoRectify
+    # return rectified
+
 def main():
 
-    img_no = 0;
-    done = False
-    while not done:
-        imLname = 'data/kitti/image2/{:06d}_10.png'.format(img_no)
-        imRname = 'data/kitti/image3/{:06d}_10.png'.format(img_no)
+    imLname = 'data/sceauxcastle/images/100_7100.JPG'
+    imRname = 'data/sceauxcastle/images/100_7101.JPG'
+    img1 = cv.pyrDown(cv.imread(imLname))
+    img2 = cv.pyrDown(cv.imread(imRname))
 
-        print("open file %s" % imLname)
+    pts1, pts2 = detectAndMatchFeatures(img1, img2)
 
-        img1 = cv.pyrDown(cv.imread(imLname))
-        img2 = cv.pyrDown(cv.imread(imRname))
+    pts1 = np.int32(pts1)
+    pts2 = np.int32(pts2)
+    F, mask = cv.findFundamentalMat(pts1, pts2, cv.FM_LMEDS)
 
-        pts1, pts2 = detectAndMatchFeatures(img1, img2)
+    print("fundamental matrix F found")
+    # print(F)
 
-        pts1 = np.int32(pts1)
-        pts2 = np.int32(pts2)
-        F, mask = cv.findFundamentalMat(pts1, pts2, cv.FM_LMEDS)
+    # select only inlier points
+    pts1 = pts1[mask.ravel() == 1]
+    pts2 = pts2[mask.ravel() == 1]
 
-        print("fundamental matrix F found")
-        print(F)
+    print("inlier points img1 %d, img2 %d" % (len(pts1), len(pts2)))
 
-        # select only inlier points
-        pts1 = pts1[mask.ravel() == 1]
-        pts2 = pts2[mask.ravel() == 1]
+    h1, w1, _ = img1.shape
+    
+    # rectify
+    _, H1, H2 = cv.stereoRectifyUncalibrated(
+            np.float32(pts1), np.float32(pts2), F,
+            imgSize=(w1, h1), threshold=0)
 
-        print("inlier points img1 %d, img2 %d" % (len(pts1), len(pts2)))
+    img1_undist = cv.warpPerspective(img1, H1, (w1, h1))
+    img2_undist = cv.warpPerspective(img2, H2, (w1, h1))
 
-        imgEpiL, imgEpiR = computeEpilines(img1, img2, pts1, pts2, F)
+    cv.imshow('img1_undistorted', img1_undist)
+    cv.imshow('img2_undistorted', img2_undist)
 
-        # cv.imwrite('out_epilines_left.png', imgEpiL)
-        # cv.imwrite('out_epilines_right.png', imgEpiR)
-        cv.imshow('out_epilines_left.png', imgEpiL)
-        cv.imshow('out_epilines_right.png', imgEpiR)
 
-        key = cv.waitKey()
-        # print(key)
-        if key == 27 or key == ord('q'): # ESC
-            done = True
-        elif key == ord('l'):
-            img_no += 1
-            img_no %= 10
-        elif key == ord('h'):
-            if img_no == 0:
-                img_no = 10
-            img_no -= 1
-            img_no %= 10
+    # stereo semi-global block matching on rectified images
+    window_size = 3
+    min_disp = 0
+    num_disp = 128-min_disp
+    block_size = 11
+    stereo = cv.StereoSGBM_create(minDisparity = min_disp,
+            numDisparities = num_disp,
+            blockSize = block_size,
+            P1 = 8*3*window_size**2,
+            P2 = 32*3*window_size**2,
+            disp12MaxDiff = -1,
+            uniquenessRatio = 10,
+            speckleWindowSize = 100,
+            speckleRange = 2
+            )
+    disp = stereo.compute(img1_undist, img2_undist).astype(np.float32) / 16.0
+    cv.imshow('disparity_undistorted', disp)
+
+
+    imgEpiL, imgEpiR = computeEpilines(img1, img2, pts1, pts2, F)
+
+    cv.imshow('out_epilines_left.png', imgEpiL)
+    cv.imshow('out_epilines_right.png', imgEpiR)
+
+    key = cv.waitKey()
 
 
 if __name__ == '__main__':

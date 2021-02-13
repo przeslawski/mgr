@@ -1,0 +1,6 @@
+[submodule "data/ImageDataset_SceauxCastle"]
+	path = data/ImageDataset_SceauxCastle
+	url = https://github.com/openMVG/ImageDataset_SceauxCastle.git
+[submodule "data/sceauxcastle"]
+	path = data/sceauxcastle
+	url = https://github.com/openMVG/ImageDataset_SceauxCastle.git
